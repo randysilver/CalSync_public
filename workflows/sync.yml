@@ -1,0 +1,116 @@
+name: Calendar Sync
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google credentials
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' | base64 -d > google_credentials.json
+
+      - name: Write Google token
+        run: |
+          mkdir -p .tokens
+          echo '${{ secrets.GOOGLE_TOKEN_B64 }}' | base64 -d > .tokens/google_token.pickle
+        continue-on-error: true
+
+      - name: Write M365 token cache
+        run: |
+          mkdir -p .tokens
+          echo '${{ secrets.M365_TOKEN_CACHE_B64 }}' | base64 -d > .tokens/m365_token_cache.json
+        continue-on-error: true
+
+      - name: Write sync state
+        env:
+          SYNC_STATE: ${{ secrets.SYNC_STATE }}
+        run: |
+          if [ -n "$SYNC_STATE" ]; then
+            printf '%s' "$SYNC_STATE" > .sync_state.json
+          else
+            echo '{}' > .sync_state.json
+          fi
+
+      - name: Write config
+        run: echo '${{ secrets.CONFIG_YAML }}' | base64 -d > config.yaml
+
+      - name: Run sync
+        run: python sync.py
+
+      - name: Save updated tokens and state
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          pip install PyNaCl requests --quiet
+
+          python3 << 'PYEOF'
+          import os, base64, json, requests
+          from nacl import encoding, public
+
+          token   = os.environ["GH_TOKEN"]
+          repo    = os.environ["REPO"]
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28"
+          }
+
+          def get_pub_key():
+              r = requests.get(
+                  f"https://api.github.com/repos/{repo}/actions/secrets/public-key",
+                  headers=headers
+              )
+              return r.json()
+
+          def encrypt(pub_key_b64, value):
+              pub_key = public.PublicKey(pub_key_b64.encode(), encoding.Base64Encoder())
+              box = public.SealedBox(pub_key)
+              return base64.b64encode(box.encrypt(value.encode())).decode()
+
+          def upsert_secret(name, value, key_data):
+              encrypted = encrypt(key_data["key"], value)
+              r = requests.put(
+                  f"https://api.github.com/repos/{repo}/actions/secrets/{name}",
+                  headers=headers,
+                  json={"encrypted_value": encrypted, "key_id": key_data["key_id"]}
+              )
+              print(f"  Updated {name}: {r.status_code}")
+
+          key_data = get_pub_key()
+
+          # Google token
+          if os.path.exists(".tokens/google_token.pickle"):
+              val = base64.b64encode(open(".tokens/google_token.pickle", "rb").read()).decode()
+              upsert_secret("GOOGLE_TOKEN_B64", val, key_data)
+
+          # M365 token cache
+          if os.path.exists(".tokens/m365_token_cache.json"):
+              val = base64.b64encode(open(".tokens/m365_token_cache.json", "rb").read()).decode()
+              upsert_secret("M365_TOKEN_CACHE_B64", val, key_data)
+
+          # Sync state
+          if os.path.exists(".sync_state.json"):
+              val = open(".sync_state.json").read().strip()
+              if val:
+                  upsert_secret("SYNC_STATE", val, key_data)
+
+          print("Done.")
+          PYEOF
