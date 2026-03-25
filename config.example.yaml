@@ -1,0 +1,41 @@
+# Copy this file to config.yaml and fill in your details.
+# Never commit config.yaml to GitHub.
+
+display_name: "Your Name"
+
+calendars:
+
+  # Your primary Google account — busy blocks are written here
+  - name:              "Primary Google"
+    email:             "you@yourdomain.com"
+    domain:            "yourdomain.com"
+    ics_url:           "https://calendar.google.com/calendar/ical/YOUR_PRIVATE_URL/basic.ics"
+    is_primary_google: true
+    calendar_id:       "primary"
+
+  # A client M365 tenant — full two-way sync
+  - name:    "Client A"
+    email:   "you@clienta.com"
+    domain:  "clienta.com"
+    ics_url: "https://outlook.office365.com/owa/calendar/YOUR_PRIVATE_URL/calendar.ics"
+
+  # A secondary Google account — read only, no busy blocks created
+  - name:           "Personal Google"
+    email:          "you@gmail.com"
+    domain:         "gmail.com"
+    ics_url:        "https://calendar.google.com/calendar/ical/YOUR_PRIVATE_URL/basic.ics"
+    invite:         false
+    sync_to_others: false
+
+  # Add more clients following the same pattern as Client A
+  # - name:    "Client B"
+  #   email:   "you@clientb.com"
+  #   domain:  "clientb.com"
+  #   ics_url: "https://..."
+
+google:
+  credentials_file: "google_credentials.json"
+
+m365:
+  client_id: "your-azure-app-client-id"
+  tenant_id: "consumers"
